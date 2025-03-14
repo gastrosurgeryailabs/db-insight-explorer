@@ -1,0 +1,14 @@
+streamlit==1.32.0
+langchain==0.1.12
+langchain-openai==0.1.1
+langchain-experimental==0.0.50
+langchain-community==0.0.29
+sqlalchemy==2.0.28
+openai==1.12.0
+python-dotenv==1.0.0
+pymysql==1.1.0
+psycopg2-binary==2.9.9
+requests==2.31.0
+pandas==2.2.0
+matplotlib==3.8.2
+squarify==0.4.3 
