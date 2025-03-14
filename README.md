@@ -31,7 +31,7 @@ A Streamlit application that allows you to chat with your database using natural
 
 1. Clone this repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/gastrosurgeryailabs/db-insight-explorer.git
    cd chat-with-db
    ```
 
@@ -110,7 +110,3 @@ Custom LLM provider option that works with your own AnythingLLM API endpoint. Th
 - **Database Connection Issues**: Make sure your database is running and accessible from your network
 - **LLM Configuration Errors**: Verify your API keys and endpoints are correct
 - **Query Errors**: If you get errors on specific queries, try rephrasing your question or providing more context
-
-## License
-
-MIT 
