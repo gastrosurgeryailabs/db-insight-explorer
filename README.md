@@ -1,4 +1,4 @@
-# Chat with Database
+# DB Explorer
 
 A Streamlit application that allows you to chat with your database using natural language. Ask questions about your data and get answers through an AI-powered interface with interactive visualizations.
 
@@ -32,7 +32,7 @@ A Streamlit application that allows you to chat with your database using natural
 1. Clone this repository:
    ```bash
    git clone https://github.com/gastrosurgeryailabs/db-insight-explorer.git
-   cd chat-with-db
+   cd db-insight-explorer
    ```
 
 2. Install dependencies:
