@@ -11,9 +11,103 @@ import pandas as pd
 import re
 import matplotlib.pyplot as plt
 import io
+import base64
+import requests
+import json
+import mimetypes
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Utility functions for file handling and Gemini API
+def encode_file_to_base64(file_bytes, file_type):
+    """Encode file bytes to base64."""
+    encoded = base64.b64encode(file_bytes).decode('utf-8')
+    return encoded
+
+def get_mime_type(file_type):
+    """Get the MIME type for a file extension."""
+    mime_type = mimetypes.guess_type(f"file.{file_type}")[0]
+    if not mime_type:
+        # Default mappings if mime type is not detected
+        default_types = {
+            'pdf': 'application/pdf',
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg'
+        }
+        mime_type = default_types.get(file_type.lower(), 'application/octet-stream')
+    return mime_type
+
+def analyze_file_with_gemini(file_bytes, file_type, prompt, api_key):
+    """Send file to Gemini API for analysis."""
+    try:
+        # Encode file to base64
+        encoded_file = encode_file_to_base64(file_bytes, file_type)
+        mime_type = get_mime_type(file_type)
+        
+        # Prepare API request
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+        headers = {'Content-Type': 'application/json'}
+        
+        data = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "data": encoded_file,
+                            "mimeType": mime_type
+                        }
+                    }
+                ]
+            }]
+        }
+        
+        # Send request to Gemini API
+        response = requests.post(api_url, headers=headers, data=json.dumps(data))
+        
+        if response.status_code == 200:
+            response_json = response.json()
+            # Extract the text response from Gemini
+            try:
+                if 'candidates' in response_json and len(response_json['candidates']) > 0:
+                    if 'content' in response_json['candidates'][0]:
+                        content = response_json['candidates'][0]['content']
+                        if 'parts' in content and len(content['parts']) > 0:
+                            return content['parts'][0]['text']
+            except Exception as e:
+                return f"Error parsing Gemini response: {str(e)}"
+            
+            return "Could not extract text from Gemini API response"
+        else:
+            return f"Error from Gemini API: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return f"Error processing file with Gemini: {str(e)}"
+
+def uploaded_file_for_db_query():
+    """Check if an uploaded file is intended for database query mode."""
+    # If we have analysis but it was marked as used, don't use it again
+    if "file_analysis_used" in st.session_state and st.session_state.file_analysis_used:
+        return False
+    
+    # Check if we have a file upload in the current session and it's set to database query mode
+    file_uploaded = False
+    
+    # Check if the key exists in the session state dictionary
+    if '_state' in st.session_state and 'data' in st.session_state._state:
+        widgets = st.session_state._state['data']
+        
+        # Find the file uploader widgets
+        for key in widgets:
+            if key.startswith('uploaded_pdf') or key.startswith('uploaded_image'):
+                if widgets[key] is not None:  # A file is uploaded
+                    file_uploaded = True
+                    break
+    
+    # Return True if we have a file and analysis in DB query mode
+    return file_uploaded and "last_file_analysis" in st.session_state
 
 st.set_page_config(page_title="Chat with Database", layout="wide")
 
@@ -28,6 +122,20 @@ if "llm" not in st.session_state:
     st.session_state.llm = None
 if "tables" not in st.session_state:
     st.session_state.tables = []
+# Gemini API and file handling session state variables
+if "gemini_configured" not in st.session_state:
+    st.session_state.gemini_configured = False
+if "gemini_api_key" not in st.session_state:
+    st.session_state.gemini_api_key = ""
+if "gemini_img_prompt" not in st.session_state:
+    st.session_state.gemini_img_prompt = "Analyze this image and extract any identifiers, IDs, or important information that could be used to query a database. If there are any game IDs, product codes, registration numbers, or similar identifiers, list them clearly."
+if "gemini_pdf_prompt" not in st.session_state:
+    st.session_state.gemini_pdf_prompt = "Extract all key identifiers, reference numbers, IDs, and structured data from this document that could be used for database queries. Format any tables or structured data clearly."
+# File analysis context variables
+if "last_file_analysis" not in st.session_state:
+    st.session_state.last_file_analysis = None
+if "file_analysis_used" not in st.session_state:
+    st.session_state.file_analysis_used = False
 
 # Function to extract table data from query results
 def extract_table_data(text):
@@ -578,6 +686,106 @@ with st.sidebar:
             st.error(f"LLM configuration failed: {e}")
             st.session_state.llm_configured = False
     
+    # Gemini API Configuration for File Analysis
+    st.subheader("Gemini API for File Analysis")
+    gemini_api_key = st.text_input("Gemini API Key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
+    
+    # Save the API key in session state
+    if gemini_api_key:
+        st.session_state.gemini_api_key = gemini_api_key
+    
+    # Custom prompts for file analysis
+    with st.expander("File Analysis Settings"):
+        img_analysis_prompt = st.text_area(
+            "Image Analysis Prompt", 
+            value=os.getenv("GEMINI_IMAGE_PROMPT", "Analyze this image and extract any identifiers, IDs, or important information that could be used to query a database. If there are any game IDs, product codes, registration numbers, or similar identifiers, list them clearly."),
+            help="This prompt will be sent with uploaded images to Gemini for data extraction."
+        )
+        pdf_analysis_prompt = st.text_area(
+            "PDF Analysis Prompt", 
+            value=os.getenv("GEMINI_PDF_PROMPT", "Extract all key identifiers, reference numbers, IDs, and structured data from this document that could be used for database queries. Format any tables or structured data clearly."),
+            help="This prompt will be sent with uploaded PDFs to Gemini for data extraction."
+        )
+        
+        # Save prompts in session state
+        if img_analysis_prompt:
+            st.session_state.gemini_img_prompt = img_analysis_prompt
+        if pdf_analysis_prompt:
+            st.session_state.gemini_pdf_prompt = pdf_analysis_prompt
+    
+    # Document type-specific prompts in a separate expander (not nested)
+    with st.expander("Document Type-Specific Prompts"):
+        receipt_prompt = st.text_area(
+            "Receipt/Invoice Prompt",
+            value="Extract the following information from this receipt/invoice: transaction ID, date, vendor name, items purchased with quantities and prices, total amount, payment method, and any other identifiers.",
+            help="Specialized prompt for analyzing receipts and invoices"
+        )
+        
+        id_card_prompt = st.text_area(
+            "ID Card/Document Prompt",
+            value="Extract all identifiers from this ID card/document: ID number, name, date of issue, expiration date, and any other reference numbers or codes visible.",
+            help="Specialized prompt for analyzing ID cards and official documents"
+        )
+        
+        game_item_prompt = st.text_area(
+            "Game/Product Prompt",
+            value="Extract the game ID, product code, serial number, and any other unique identifiers visible in this image that could be used to look up information in a database.",
+            help="Specialized prompt for analyzing game or product images"
+        )
+        
+        # Button to apply a specialized prompt
+        doc_type = st.selectbox(
+            "Apply Specialized Prompt",
+            ["None (Use Default)", "Receipt/Invoice", "ID Card/Document", "Game/Product"]
+        )
+        
+        if st.button("Apply Selected Prompt"):
+            if doc_type == "Receipt/Invoice":
+                st.session_state.gemini_img_prompt = receipt_prompt
+                st.session_state.gemini_pdf_prompt = receipt_prompt
+                st.success("Applied Receipt/Invoice prompt to both image and PDF analyzers")
+            elif doc_type == "ID Card/Document":
+                st.session_state.gemini_img_prompt = id_card_prompt
+                st.session_state.gemini_pdf_prompt = id_card_prompt
+                st.success("Applied ID Card/Document prompt to both image and PDF analyzers")
+            elif doc_type == "Game/Product":
+                st.session_state.gemini_img_prompt = game_item_prompt
+                st.session_state.gemini_pdf_prompt = game_item_prompt
+                st.success("Applied Game/Product prompt to both image and PDF analyzers")
+            st.rerun()  # Refresh to show updated prompt values
+    
+    # Test Gemini API connection
+    test_gemini_config = st.button("Test Gemini API")
+    if test_gemini_config:
+        if gemini_api_key:
+            try:
+                # Simple test request to Gemini API
+                api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={gemini_api_key}"
+                headers = {'Content-Type': 'application/json'}
+                
+                data = {
+                    "contents": [{
+                        "parts":[
+                            {"text": "Hello, please respond with 'Gemini API connection successful!' if you can hear me."}
+                        ]
+                    }]
+                }
+                
+                response = requests.post(api_url, headers=headers, data=json.dumps(data))
+                
+                if response.status_code == 200:
+                    st.session_state.gemini_configured = True
+                    st.success("Gemini API connection successful!")
+                else:
+                    st.error(f"Gemini API connection failed: {response.text}")
+                    st.session_state.gemini_configured = False
+            except Exception as e:
+                st.error(f"Gemini API connection failed: {e}")
+                st.session_state.gemini_configured = False
+        else:
+            st.warning("Please enter a Gemini API key")
+            st.session_state.gemini_configured = False
+    
     st.markdown("---")
     
     if st.session_state.db_connected and st.session_state.llm_configured:
@@ -624,9 +832,112 @@ with tab1:
 
     # Input field for user's question
     if st.session_state.db_connected and st.session_state.llm_configured:
-        user_question = st.chat_input("Ask a question about your database")
+        # File upload container
+        with st.container():
+            # Create a row for the file upload section
+            col1, col2, col3 = st.columns([1, 1, 3])
+            
+            with col1:
+                uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"], help="Upload a PDF to extract information for database queries")
+            
+            with col2:
+                uploaded_image = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"], help="Upload an image to extract information for database queries")
+            
+            with col3:
+                if uploaded_pdf is not None or uploaded_image is not None:
+                    # Display information about the uploaded file
+                    if uploaded_pdf:
+                        st.info(f"PDF uploaded: {uploaded_pdf.name}")
+                    elif uploaded_image:
+                        st.info(f"Image uploaded: {uploaded_image.name}")
+                        
+                    # Check if Gemini is configured
+                    if not st.session_state.gemini_configured:
+                        st.warning("Please configure Gemini API in the sidebar to analyze files.")
+                    
+                    # Add analysis mode selection
+                    analysis_mode = st.radio(
+                        "Analysis Mode",
+                        ["Analyze Only", "Use for Database Query"],
+                        index=1,  # Default to database query mode
+                        help="Select how to use the analyzed file data"
+                    )
+                    
+                    # Add an analyze button
+                    analyze_file = st.button("Analyze File", key="analyze_file_btn")
+                    if analyze_file and st.session_state.gemini_configured:
+                        with st.spinner("Analyzing file with Gemini AI..."):
+                            if uploaded_pdf:
+                                file_bytes = uploaded_pdf.getvalue()
+                                file_type = "pdf"
+                                prompt = st.session_state.gemini_pdf_prompt
+                            else:  # uploaded_image
+                                file_bytes = uploaded_image.getvalue()
+                                file_type = uploaded_image.name.split('.')[-1].lower()
+                                prompt = st.session_state.gemini_img_prompt
+                            
+                            # Add extraction request to the prompt
+                            enhanced_prompt = prompt + "\n\nPlease extract any identifiers, IDs, or key information that could be used for database queries."
+                            
+                            # Send file to Gemini API
+                            api_key = st.session_state.gemini_api_key
+                            analysis_result = analyze_file_with_gemini(file_bytes, file_type, enhanced_prompt, api_key)
+                            
+                            # Store the analysis result in session state for use in database queries
+                            st.session_state.last_file_analysis = analysis_result
+                            
+                            if analysis_mode == "Analyze Only":
+                                # Add the file analysis to the chat history
+                                if uploaded_pdf:
+                                    user_msg = f"I've uploaded a PDF file: {uploaded_pdf.name} for analysis."
+                                else:
+                                    user_msg = f"I've uploaded an image: {uploaded_image.name} for analysis."
+                                
+                                # Add to conversation history
+                                st.session_state.messages.append({"role": "user", "content": user_msg})
+                                st.session_state.messages.append({"role": "assistant", "content": analysis_result})
+                                
+                                # Force a rerun to display the new messages
+                                st.rerun()
+                            else:
+                                # For database query mode, show the extracted information but don't add to chat yet
+                                st.subheader("Extracted Information")
+                                st.markdown(analysis_result)
+                                st.info("Now you can ask questions about this data. The extracted information will be used as context for your database query.")
+        
+        # Chat input for text-based queries
+        if "last_file_analysis" in st.session_state and uploaded_file_for_db_query():
+            input_placeholder = "Ask a question about the analyzed file and your database"
+        else:
+            input_placeholder = "Ask a question about your database or upload a file for analysis"
+            
+        user_question = st.chat_input(input_placeholder)
         
         if user_question:
+            # Determine if we need to include file analysis context
+            combined_query = user_question
+            context_added = False
+            
+            if ("last_file_analysis" in st.session_state and 
+                uploaded_file_for_db_query() and 
+                not user_question.lower().startswith("ignore file")):
+                # Combine the analysis result with the user question for context
+                extracted_info = st.session_state.last_file_analysis
+                combined_query = f"File Analysis Context:\n{extracted_info}\n\nUser Question: {user_question}"
+                context_added = True
+                
+                # Also add the original analysis to the chat for reference
+                if uploaded_pdf:
+                    context_msg = f"I've uploaded a PDF file: {uploaded_pdf.name} and extracted the following information:\n\n{extracted_info}"
+                else:
+                    context_msg = f"I've uploaded an image: {uploaded_image.name} and extracted the following information:\n\n{extracted_info}"
+                
+                # Add context message if not already in conversation
+                if not st.session_state.messages or st.session_state.messages[-1]["content"] != context_msg:
+                    st.session_state.messages.append({"role": "user", "content": context_msg})
+                    with st.chat_message("user"):
+                        st.markdown(context_msg)
+            
             # Add user's question to conversation history
             st.session_state.messages.append({"role": "user", "content": user_question})
             
@@ -641,7 +952,12 @@ with tab1:
                     try:
                         # Get response from SQL agent
                         sql_agent = SQLChatAgent(st.session_state.llm, st.session_state.db_connection_string)
-                        response_content = sql_agent.query(user_question)
+                        
+                        # Use the combined query if context was added
+                        if context_added:
+                            response_content = sql_agent.query(combined_query)
+                        else:
+                            response_content = sql_agent.query(user_question)
                         
                         # Display response
                         message_placeholder.markdown(response_content)
@@ -669,6 +985,12 @@ with tab1:
                         
                         # Add response to conversation history
                         st.session_state.messages.append({"role": "assistant", "content": response_content})
+                        
+                        # Clear the file analysis context after it's been used
+                        if context_added and "last_file_analysis" in st.session_state:
+                            # Keep the context for one more query in case the user has a follow-up
+                            # but mark it as used
+                            st.session_state.file_analysis_used = True
                     except Exception as e:
                         error_message = f"Error processing your query: {str(e)}"
                         message_placeholder.error(error_message)

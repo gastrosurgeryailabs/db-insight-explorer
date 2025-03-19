@@ -17,6 +17,11 @@ A Streamlit application that allows you to chat with your database using natural
 - Smart visualization suggestions based on data type
 - Chat history to review previous questions and answers
 - Easy-to-use configuration in the sidebar
+- File analysis with Google Gemini AI:
+  - Upload and analyze PDF documents
+  - Upload and analyze images
+  - Extract data for database queries
+  - Use extracted IDs and information as context for database searches
 
 ## Prerequisites
 
@@ -26,6 +31,7 @@ A Streamlit application that allows you to chat with your database using natural
   - OpenAI API key
   - Azure OpenAI credentials
   - AnythingLLM API endpoint and key
+- Google Gemini API key (for file analysis features)
 
 ## Installation
 
@@ -60,6 +66,13 @@ A Streamlit application that allows you to chat with your database using natural
 
 4. Start chatting with your database!
 
+5. To analyze files:
+   - Configure your Gemini API key in the sidebar
+   - Upload a PDF or image using the file upload buttons
+   - Click "Analyze File" to process with Gemini AI
+   - Choose "Use for Database Query" to use the extracted data in your queries
+   - Ask questions that reference the extracted information
+
 ## How it Works
 
 This application uses:
@@ -71,6 +84,7 @@ This application uses:
   - OpenAI
   - Azure OpenAI
   - AnythingLLM (with custom API endpoint support)
+- **Google Gemini AI**: For PDF and image analysis
 
 The app translates your natural language questions into SQL queries and returns the results in a conversational format with appropriate data visualizations.
 
@@ -98,6 +112,31 @@ For users using Azure OpenAI deployments, with custom endpoint and deployment na
 ### AnythingLLM
 Custom LLM provider option that works with your own AnythingLLM API endpoint. This allows you to use any LLM that's compatible with the OpenAI API format.
 
+## File Analysis with Gemini AI
+
+The application provides advanced file analysis capabilities powered by Google's Gemini AI:
+
+### PDF Analysis
+- Upload PDF documents to extract IDs, reference numbers, and key information
+- Extracted data is automatically used as context for database queries
+- Specialized prompts for different document types (invoices, ID cards, etc.)
+
+### Image Analysis
+- Upload images to extract IDs, product codes, and other identifiers
+- Perfect for game screenshots, product images, or ID cards
+- Extracted information becomes context for your database queries
+
+### Integration with Database Queries
+- Upload a file containing IDs or reference numbers
+- Ask questions about the extracted information
+- The application combines the extracted data with your question
+- Results show the relevant database information for the extracted IDs
+
+### Configuration
+- Set your Gemini API key in the sidebar
+- Choose from specialized prompts for different document types
+- Customize analysis prompts for specific use cases
+
 ## Examples of Questions You Can Ask
 
 - "How many users are registered in the system?"
@@ -110,3 +149,7 @@ Custom LLM provider option that works with your own AnythingLLM API endpoint. Th
 - **Database Connection Issues**: Make sure your database is running and accessible from your network
 - **LLM Configuration Errors**: Verify your API keys and endpoints are correct
 - **Query Errors**: If you get errors on specific queries, try rephrasing your question or providing more context
+- **File Analysis Issues**: 
+  - Ensure your Gemini API key is valid
+  - Check that file formats are supported (PDF, JPG, JPEG, PNG)
+  - Large files may take longer to process
